@@ -5,6 +5,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <inttypes.h>
+#include <unistd.h>
 
 #define CHUNK_SIZE	14
 
@@ -18,14 +19,18 @@
 #define REG_DATA6	"register70c"
 #define REG_DATA7	"register70e"
 
-#define RESP_RETRY		0x0102
-#define RESP_OK			0x0002
-#define RESP_WAIT		0x0401
-#define RESP_COMPLETED	0x0000
+#define RESP_RETRY			0x0102
+#define RESP_OK				0x0002
+#define RESP_WAIT			0x0401
+#define RESP_COMPLETED		0x0000
+#define RESP_READY_TO_START	0x0202
+#define RESP_STARTING       0x00c9
+#define RESP_UNKNOWN        0x00ca
 
 #define CMD_SET_PARAMS		0x0c01
 #define CMD_SET_CHECKSUM	0x0801
 #define CMD_SET_DATA		0x0e01
+#define CMD_START_FIRMWARE  0x0201
 
 static const uint32_t start_addr = 0xbd003000;
 static const uint32_t exec_addr = 0xbd003000;
@@ -279,9 +284,25 @@ int main(int argc, char *argv[]) {
 	}
 	fclose(fp);
 	
+	printf("Done uploading firmware.\n");
+	
+	sleep(1);
+	
+	write_register(argv[2], REG_STATUS, CMD_START_FIRMWARE);
+	printf("Firmware start command sent.\n");
+
 	// FIXME: Timeout
 	read_register(argv[2], REG_STATUS, &regval);
-	while(regval == RESP_WAIT) {
+	while(regval != RESP_UNKNOWN) {
+		read_register(argv[2], REG_STATUS, &regval);
+	}
+
+	write_register(argv[2], REG_STATUS, CMD_START_FIRMWARE);
+	printf("Firmware start command sent.\n");	
+
+	// FIXME: Timeout
+	read_register(argv[2], REG_STATUS, &regval);
+	while(regval != RESP_OK) {
 		read_register(argv[2], REG_STATUS, &regval);
 	}
 	
