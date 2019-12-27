@@ -4,6 +4,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <inttypes.h>
 
 #define CHUNK_SIZE	14
 
@@ -17,18 +18,22 @@
 #define REG_DATA6	"register70c"
 #define REG_DATA7	"register70e"
 
+#define RESP_RETRY	0x0102
+#define RESP_OK		0x0002
+#define RESP_WAIT	0x0401
+
+#define CMD_SET_PARAMS		0x0c01
+#define CMD_SET_CHECKSUM	0x0801
+#define CMD_SET_DATA		0x0e01
+
 static const uint32_t start_addr = 0xbd003000;
 static const uint32_t exec_addr = 0xbd003000;
 static const uint32_t checksum_static = 0x6a83ffc7;
 
-static const uint32_t CMD_SET_PARAMS = 0x0c01;
-static const uint32_t CMD_SET_CHECKSUM = 0x0801;
-static const uint32_t CMD_SET_DATA = 0x0e01;
+
 
 static const char mac_data[CHUNK_SIZE] = {0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0x04, 0x20, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00};
 
-static const uint32_t RESP_OK = 0x02;
-static const uint32_t RESP_WAIT = 0x0401;
 
 off_t fsize(const char *filename) {
     struct stat st; 
@@ -81,10 +86,10 @@ static int write_register(char *basepath, char *regpath, uint16_t value) {
 	strcat(tmpPath, regpath);
 	
 	FILE *fp;
-	fp = fopen(tmpPath, "wb");
+	fp = fopen(tmpPath, "w");
 	if(fp == NULL)
 		return 1;
-	fwrite(&value, 2, 1, fp);
+	fprintf(fp, "%" PRIu16, value);
 	fclose(fp);
 	return 0;
 }
@@ -100,10 +105,10 @@ static int read_register(char *basepath, char *regpath, uint16_t *value) {
 	strcat(tmpPath, regpath);
 	
 	FILE *fp;
-	fp = fopen(tmpPath, "rb");
+	fp = fopen(tmpPath, "r");
 	if(fp == NULL)
 		return 1;
-	fread(value, 2, 1, fp);
+	fscanf(fp, "0x%" SCNu16, value);
 	fclose(fp);
 	return 0;
 }
@@ -155,42 +160,42 @@ static int write_chunk(char *basepath, const char *data, const int len) {
 	
 	regval = data[0];
 	if(len > 1)
-		regval = data[0] << 8 | data[1];
+		regval = (regval << 8) | data[1];
 	write_register(basepath, REG_DATA1, regval);
 	if(len > 2) {
 		regval = data[2];
 		if(len > 3)
-			regval = data[2] << 8 | data[3];
+			regval = (regval << 8) | data[3];
 		write_register(basepath, REG_DATA2, regval);
 	}
 	if(len > 4) {
 		regval = data[4];
 		if(len > 5)
-			regval = data[4] << 8 | data[5];
+			regval = (regval << 8) | data[5];
 		write_register(basepath, REG_DATA3, regval);
 	}
 	if(len > 6) {
 		regval = data[6];
 		if(len > 7)
-			regval = data[6] << 8 | data[7];
+			regval = (regval << 8) | data[7];
 		write_register(basepath, REG_DATA4, regval);
 	}
 	if(len > 8) {
 		regval = data[8];
 		if(len > 9)
-			regval = data[8] << 8 | data[9];
+			regval = (regval << 8) | data[9];
 		write_register(basepath, REG_DATA5, regval);
 	}
 	if(len > 10) {
 		regval = data[10];
 		if(len > 11)
-			regval = data[10] << 8 | data[11];
+			regval = (regval << 8) | data[11];
 		write_register(basepath, REG_DATA6, regval);
 	}
 	if(len > 12) {
 		regval = data[12];
 		if(len > 13)
-			regval = data[12] << 8 | data[13];
+			regval = (regval << 8) | data[13];
 		write_register(basepath, REG_DATA7, regval);
 	}
 	
@@ -246,13 +251,13 @@ int main(int argc, char *argv[]) {
 		return 1;
 		
 	read_register(argv[2], REG_STATUS, &regval);
-	if(regval != 0x2) {
+	if(regval != RESP_OK) {
 		printf("Error: WASP not ready (0x%x)\n", regval);
 		return 1;
 	}
 
 	read_register(argv[2], REG_ZERO, &regval);
-	if(regval != 0x2) {
+	if(regval != RESP_OK) {
 		printf("Error: WASP not ready (0x%x)\n", regval);
 		return 1;
 	}
