@@ -18,9 +18,10 @@
 #define REG_DATA6	"register70c"
 #define REG_DATA7	"register70e"
 
-#define RESP_RETRY	0x0102
-#define RESP_OK		0x0002
-#define RESP_WAIT	0x0401
+#define RESP_RETRY		0x0102
+#define RESP_OK			0x0002
+#define RESP_WAIT		0x0401
+#define RESP_COMPLETED	0x0000
 
 #define CMD_SET_PARAMS		0x0c01
 #define CMD_SET_CHECKSUM	0x0801
@@ -158,57 +159,57 @@ static int write_checksum(char *basepath, const uint32_t checksum) {
 static int write_chunk(char *basepath, const char *data, const int len) {
 	uint16_t regval;
 	
-	regval = data[0];
+	regval = (data[0] & 0xff);
 	if(len > 1)
-		regval = (regval << 8) | data[1];
+		regval = (regval << 8) | (data[1] & 0xff);
 	write_register(basepath, REG_DATA1, regval);
 	if(len > 2) {
-		regval = data[2];
+		regval = (data[2] & 0xff);
 		if(len > 3)
-			regval = (regval << 8) | data[3];
+			regval = (regval << 8) | (data[3] & 0xff);
 		write_register(basepath, REG_DATA2, regval);
 	}
 	if(len > 4) {
-		regval = data[4];
+		regval = (data[4] & 0xff);
 		if(len > 5)
-			regval = (regval << 8) | data[5];
+			regval = (regval << 8) | (data[5] & 0xff);
 		write_register(basepath, REG_DATA3, regval);
 	}
 	if(len > 6) {
-		regval = data[6];
+		regval = (data[6] & 0xff);
 		if(len > 7)
-			regval = (regval << 8) | data[7];
+			regval = (regval << 8) | (data[7] & 0xff);
 		write_register(basepath, REG_DATA4, regval);
 	}
 	if(len > 8) {
-		regval = data[8];
+		regval = (data[8] & 0xff);
 		if(len > 9)
-			regval = (regval << 8) | data[9];
+			regval = (regval << 8) | (data[9] & 0xff);
 		write_register(basepath, REG_DATA5, regval);
 	}
 	if(len > 10) {
-		regval = data[10];
+		regval = (data[10] & 0xff);
 		if(len > 11)
-			regval = (regval << 8) | data[11];
+			regval = (regval << 8) | (data[11] & 0xff);
 		write_register(basepath, REG_DATA6, regval);
 	}
 	if(len > 12) {
-		regval = data[12];
+		regval = (data[12] & 0xff);
 		if(len > 13)
-			regval = (regval << 8) | data[13];
+			regval = (regval << 8) | (data[13] & 0xff);
 		write_register(basepath, REG_DATA7, regval);
 	}
 	
 	write_register(basepath, REG_STATUS, CMD_SET_DATA);
 	
 	read_register(basepath, REG_ZERO, &regval);
-	if(regval != RESP_OK) {
-		printf("Error writing chunk!\n");
+	if((regval != RESP_OK) && (regval != RESP_COMPLETED) && (regval != RESP_WAIT)) {
+		printf("Error writing chunk: REG_ZERO = 0x%x!\n", regval);
 		return 1;
 	}
 	read_register(basepath, REG_STATUS, &regval);
-	if(regval != RESP_OK) {
-		printf("Error writing chunk!\n");
+	if((regval != RESP_OK) && (regval != RESP_WAIT) && (regval != RESP_COMPLETED)) {
+		printf("Error writing chunk: REG_STATUS = 0x%x!\n", regval);
 		return 1;
 	}
 	return 0;
