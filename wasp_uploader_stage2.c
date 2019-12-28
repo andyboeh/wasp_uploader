@@ -11,17 +11,141 @@
 #include <netinet/ether.h>
 #include <unistd.h>
 
-#define ETHER_TYPE 	0x88bd
-#define BUF_SIZE	1024
+#define ETHER_TYPE 			0x88bd
+#define BUF_SIZE			1056
+#define COUNTER_INCR		4
+
+#define MAX_PAYLOAD_SIZE	1028
+#define CHUNK_SIZE			1024
+#define WASP_HEADER_LEN		14
+
+#define PACKET_START		0x1200
+#define CMD_FIRMWARE_DATA	0x0104
+#define CMD_START_FIRMWARE	0xd400
+
+#define RESP_DISCOVER		0x0000
+#define RESP_OK				0x0100
+#define RESP_STARTING		0x0200
+#define RESP_ERROR			0x0300
+
+static const uint32_t m_load_addr = 0x81a00000;
+
+static const uint8_t wasp_mac[] = {0x00, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa};
+static uint16_t m_packet_counter = 0;
+
+static int m_socket_initialized = 0;
+
+
+typedef struct __attribute__((packed)) {
+	union {
+		uint8_t data[MAX_PAYLOAD_SIZE + WASP_HEADER_LEN];
+		struct __attribute__((packed)) {
+			uint16_t	packet_start;
+			uint8_t		pad_one[5];
+			uint16_t	command;
+			uint16_t	response;
+			uint16_t	counter;
+			uint8_t		pad_two;
+			uint8_t		payload[MAX_PAYLOAD_SIZE];
+		};
+	};
+} t_wasp_packet;
+
+static int send_packet(t_wasp_packet *packet, int payloadlen, char *devname) {
+	char sendbuf[BUF_SIZE];
+	static int sockfd;
+	static struct ifreq if_idx;
+	static struct ifreq if_mac;
+	struct ether_header *eh = (struct ether_header *) sendbuf;
+	int tx_len = 0;
+	struct sockaddr_ll socket_address;
+
+	if(!m_socket_initialized) {
+		if ((sockfd = socket(AF_PACKET, SOCK_RAW, IPPROTO_RAW)) == -1) {
+	    	perror("socket");
+	    	return 1;
+		}
+
+		/* Get the index of the interface to send on */
+		memset(&if_idx, 0, sizeof(struct ifreq));
+		strncpy(if_idx.ifr_name, devname, IFNAMSIZ-1);
+
+		if (ioctl(sockfd, SIOCGIFINDEX, &if_idx) < 0) {
+			perror("SIOCGIFINDEX");
+			return 1;
+		}
+
+		/* Get the MAC address of the interface to send on */
+		memset(&if_mac, 0, sizeof(struct ifreq));
+		strncpy(if_mac.ifr_name, devname, IFNAMSIZ-1);
+		if (ioctl(sockfd, SIOCGIFHWADDR, &if_mac) < 0) {
+			perror("SIOCGIFHWADDR");
+			return 1;
+		}
+		m_socket_initialized = 1;
+	}
+	
+	memset(sendbuf, 0, BUF_SIZE);
+	
+	eh->ether_shost[0] = ((uint8_t *)&if_mac.ifr_hwaddr.sa_data)[0];
+	eh->ether_shost[1] = ((uint8_t *)&if_mac.ifr_hwaddr.sa_data)[1];
+	eh->ether_shost[2] = ((uint8_t *)&if_mac.ifr_hwaddr.sa_data)[2];
+	eh->ether_shost[3] = ((uint8_t *)&if_mac.ifr_hwaddr.sa_data)[3];
+	eh->ether_shost[4] = ((uint8_t *)&if_mac.ifr_hwaddr.sa_data)[4];
+	eh->ether_shost[5] = ((uint8_t *)&if_mac.ifr_hwaddr.sa_data)[5];
+	for(int i=0; i<6; i++) {
+		eh->ether_dhost[i] = wasp_mac[i];
+	}
+	/* Ethertype field */
+	eh->ether_type = ETHER_TYPE;
+	tx_len += sizeof(struct ether_header);
+
+	for(int i=0; i<WASP_HEADER_LEN; i++) {
+		sendbuf[tx_len++] = packet->data[i];
+	}
+	
+	for(int i=0; i<payloadlen; i++) {
+		sendbuf[tx_len++] = packet->data[WASP_HEADER_LEN + i];
+	}
+	
+	/* Index of the network device */
+	socket_address.sll_ifindex = if_idx.ifr_ifindex;
+	/* Address length*/
+	socket_address.sll_halen = ETH_ALEN;
+	/* Destination MAC */
+
+	for(int i=0; i<6; i++) {
+		socket_address.sll_addr[i] = wasp_mac[i];
+	}
+
+	/* Send packet */
+	if (sendto(sockfd, sendbuf, tx_len, 0, (struct sockaddr*)&socket_address, sizeof(struct sockaddr_ll)) < 0) {
+		printf("Send failed\n");
+		return 1;
+	}
+
+	return 0;
+
+}
 
 int main(int argc, char *argv[]) {
 	int sockfd;
+	int valid = 1;
+	int done = 0;
 	int i;
 	int sockopt;
 	uint8_t buf[BUF_SIZE];
 	struct ifreq ifopts;	/* set promiscuous mode */
 	ssize_t numbytes;
-	
+	t_wasp_packet *packet = (t_wasp_packet *) (buf + sizeof(struct ether_header));
+	t_wasp_packet s_packet;
+	FILE *fp = NULL;
+	ssize_t read;
+	int data_offset = 0;
+	int fsize;
+	int num_chunks;
+	int chunk_counter = 1;
+
 	printf("AVM WASP Stage 2 uploader.\n");
 	if(argc > 1) {
 		printf("Arguments:\n");
@@ -38,9 +162,25 @@ int main(int argc, char *argv[]) {
 	printf("Using file: %s\n", argv[1]);
 	printf("Using Dev : %s\n", argv[2]);
 	
+	fp = fopen(argv[1], "rb");
+	if(fp == NULL) {
+		printf("Input file not found: %s\n", argv[1]);
+	}
+	fseek(fp, 0, SEEK_END);
+	fsize = ftell(fp);
+	fseek(fp, 0, SEEK_SET);
+	fclose(fp);
+	fp = NULL;
+	
+	num_chunks = fsize / CHUNK_SIZE;
+	if(fsize % CHUNK_SIZE != 0) {
+		num_chunks++;
+	}
+
+	printf("Going to send %d chunks.\n", num_chunks);
 
 	/* Header structures */
-	//struct ether_header *eh = (struct ether_header *) buf;
+	struct ether_header *eh = (struct ether_header *) buf;
 	//struct iphdr *iph = (struct iphdr *) (buf + sizeof(struct ether_header));
 	//struct udphdr *udph = (struct udphdr *) (buf + sizeof(struct iphdr) + sizeof(struct ether_header));
 
@@ -70,15 +210,77 @@ int main(int argc, char *argv[]) {
 	}
 
 	//FIXME: Timeout
-	while(1) {
+	while(!done) {
 		printf("listener: Waiting to recvfrom...\n");
 		numbytes = recvfrom(sockfd, buf, BUF_SIZE, 0, NULL, NULL);
 		printf("listener: got packet %lu bytes\n", numbytes);	
+
+		for(i=0; i<6; i++) {
+			if(eh->ether_shost[i] != wasp_mac[i])
+				valid = 0;
+		}
 		
-		printf("\tData:");
-		for (i=0; i<numbytes; i++)
-			printf("%02x:", buf[i]);
-		printf("\n");
+		if(!valid)
+			continue;
+		
+		if((packet->packet_start == PACKET_START) && (packet->response == RESP_DISCOVER)) {
+			printf("Got discovery packet, starting firmware download...\n");
+			m_packet_counter = 0;
+		} else if((packet->packet_start == PACKET_START) && (packet->response == RESP_OK)) {
+			memset(&s_packet, 0, sizeof(s_packet));
+
+			printf("Got reply, sending next chunk...\n");
+		} else if((packet->packet_start == PACKET_START) && (packet->response == RESP_ERROR)) {
+			printf("Received an error packet!\n");
+			done = 1;
+			continue;
+		} else if((packet->packet_start == PACKET_START) && (packet->response == RESP_STARTING)) {
+			printf("Successfully uploaded stage 2 firmware!\n");
+			done = 1;
+			continue;
+		} else {
+			printf("Got unknown packet!\n");
+			continue;
+		}
+		if(m_packet_counter == 0) {
+			printf("Sending first chunk!\n");
+			if(fp == NULL) {
+				fp = fopen(argv[1], "rb");
+			}
+			else {
+				fseek(fp, 0, SEEK_SET);
+			}
+			memcpy(s_packet.payload, &m_load_addr, sizeof(m_load_addr));
+			data_offset = sizeof(m_load_addr);
+		} else {
+			data_offset = 0;
+		}
+		if(!feof(fp)) {
+			read = fread(&s_packet.payload[data_offset], 1, CHUNK_SIZE, fp);
+			s_packet.packet_start = PACKET_START;
+			if(chunk_counter == num_chunks) {
+				printf("Sending last chunk!\n");
+				s_packet.response = CMD_START_FIRMWARE;
+				memcpy(&s_packet.payload[data_offset + read], &m_load_addr, sizeof(m_load_addr));
+				data_offset += sizeof(m_load_addr);
+			} else {
+				s_packet.command = CMD_FIRMWARE_DATA;
+			}
+			s_packet.counter = m_packet_counter;
+			if(send_packet(&s_packet, read + data_offset, argv[2]) != 0) {
+				printf("Error sending packet.\n");
+				continue;
+			}
+			m_packet_counter += COUNTER_INCR;
+			chunk_counter++;
+		} else {
+			printf("EOF\n");
+			fclose(fp);
+		}
 	}
+	if(fp)
+		fclose(fp);
+	close(sockfd);
+	
 	return 0;
 }
