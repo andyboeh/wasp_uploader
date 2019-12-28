@@ -226,7 +226,7 @@ int main(int argc, char *argv[]) {
 	off_t size;
 	uint16_t regval;
   
-	printf("AVM WASP uploader.\n");
+	printf("AVM WASP Stage 1 uploader.\n");
 	if(argc > 1) {
 		printf("Arguments:\n");
 		for(int i=1; i<argc; i++) {
@@ -235,7 +235,7 @@ int main(int argc, char *argv[]) {
 	}
 	
 	if(argc < 3) {
-		printf("Usage: %s ath_tgt_fw1.bin /sys/bus/mdio/devices/00:07\n", argv[0]);
+		printf("Usage: %s ath_tgt_fw1.bin /sys/bus/mdio_bus/devices/0\\:07\n", argv[0]);
 		return 1;
 	}
 	

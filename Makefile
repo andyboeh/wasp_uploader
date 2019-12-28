@@ -12,18 +12,23 @@ PREFIX ?= /usr/local/
 CFLAGS ?= -Wall -Wextra -Werror
 LDLIBS  = 
 
-objs = $(patsubst %.c, %.o, $(wildcard *.c))
+objs_stage1 = wasp_uploader_stage1.o
+objs_stage2 = wasp_uploader_stage2.o
 hdrs = $(wildcard *.h)
 
 %.o: %.c $(hdrs) Makefile
 	@printf "  CC      $(subst $(ROOTDIR)/,,$(shell pwd)/$@)\n"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-wasp_uploader: $(objs)
+all: wasp_uploader_stage1 wasp_uploader_stage2
+
+wasp_uploader_stage1: $(objs_stage1)
 	@printf "  CC      $(subst $(ROOTDIR)/,,$(shell pwd)/$@)\n"
 	@$(CC) $(LDFLAGS) $(LDLIBS) -o $@ $^
 
-all: wasp_uploader
+wasp_uploader_stage2: $(objs_stage2)
+	@printf "  CC      $(subst $(ROOTDIR)/,,$(shell pwd)/$@)\n"
+	@$(CC) $(LDFLAGS) $(LDLIBS) -o $@ $^
 
 clean:
 	@rm -f *.o
@@ -34,5 +39,6 @@ dist:
 	@git archive --format=tar --prefix=$(PKG)/ v$(VERSION) | xz >../$(ARCHIVE)
 	@(cd .. && sha256sum $(ARCHIVE) > $(ARCHIVE).sha256)
 
-install: wasp_uploader
-	@cp wasp_uploader $(DESTDIR)/$(PREFIX)/bin/
+install: all
+	@cp wasp_uploader_stage1 $(DESTDIR)/$(PREFIX)/bin/
+	@cp wasp_uploader_stage2 $(DESTDIR)/$(PREFIX)/bin/
