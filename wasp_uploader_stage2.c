@@ -1,3 +1,16 @@
+/*
+ * Simple stage 2 firmware uploader for AVM WASP as found in the FRITZ!Box 3390
+ *
+ * The protocol was found by sniffing ethernet traffic between the two SoCs,
+ * so some things might be wrong or incomplete.
+ *
+ * Important: if the switch is configured for VLAN tagging, the eth0.1 interface
+ *            has to be used, not eth0!
+ *
+ * (c) 2019 Andreas Böhler
+ */
+
+
 #include <arpa/inet.h>
 #include <linux/if_packet.h>
 #include <linux/ip.h>
@@ -211,9 +224,9 @@ int main(int argc, char *argv[]) {
 
 	//FIXME: Timeout
 	while(!done) {
-		printf("listener: Waiting to recvfrom...\n");
+		//printf("listener: Waiting to recvfrom...\n");
 		numbytes = recvfrom(sockfd, buf, BUF_SIZE, 0, NULL, NULL);
-		printf("listener: got packet %lu bytes\n", numbytes);	
+		//printf("listener: got packet %lu bytes\n", numbytes);	
 
 		for(i=0; i<6; i++) {
 			if(eh->ether_shost[i] != wasp_mac[i])
@@ -229,7 +242,7 @@ int main(int argc, char *argv[]) {
 		} else if((packet->packet_start == PACKET_START) && (packet->response == RESP_OK)) {
 			memset(&s_packet, 0, sizeof(s_packet));
 
-			printf("Got reply, sending next chunk...\n");
+			//printf("Got reply, sending next chunk...\n");
 		} else if((packet->packet_start == PACKET_START) && (packet->response == RESP_ERROR)) {
 			printf("Received an error packet!\n");
 			done = 1;
@@ -243,7 +256,7 @@ int main(int argc, char *argv[]) {
 			continue;
 		}
 		if(m_packet_counter == 0) {
-			printf("Sending first chunk!\n");
+			//printf("Sending first chunk!\n");
 			if(fp == NULL) {
 				fp = fopen(argv[1], "rb");
 			}
@@ -259,7 +272,7 @@ int main(int argc, char *argv[]) {
 			read = fread(&s_packet.payload[data_offset], 1, CHUNK_SIZE, fp);
 			s_packet.packet_start = PACKET_START;
 			if(chunk_counter == num_chunks) {
-				printf("Sending last chunk!\n");
+				//printf("Sending last chunk!\n");
 				s_packet.response = CMD_START_FIRMWARE;
 				memcpy(&s_packet.payload[data_offset + read], &m_load_addr, sizeof(m_load_addr));
 				data_offset += sizeof(m_load_addr);
@@ -274,7 +287,7 @@ int main(int argc, char *argv[]) {
 			m_packet_counter += COUNTER_INCR;
 			chunk_counter++;
 		} else {
-			printf("EOF\n");
+			//printf("EOF\n");
 			fclose(fp);
 		}
 	}

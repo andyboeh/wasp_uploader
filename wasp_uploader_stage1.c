@@ -1,4 +1,14 @@
-// Based on mdio-tool.c Copyright (C) 2013 Pieter Voorthuijsen
+/*
+ * Simple stage 1 firmware uploader for AVM WASP as found in the FRITZ!Box 3390
+ *
+ * The protocol was found by dumping MDIO traffic between the two SoCs,
+ * so some things might be wrong or incomplete.
+ *
+ * MDIO read/write functions are taken from mdio-tool.c,
+ * Copyright (C) 2013 Pieter Voorthuijsen
+ *
+ * (c) 2019 Andreas Böhler
+ */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -77,7 +87,6 @@ static int mdio_read(int location, int *value)
 		strerror(errno));
 		return -1;
     }
-
 	*value = mii->val_out;
     return 0;
 }
@@ -93,6 +102,7 @@ static int mdio_write(int location, int value)
 		strerror(errno));
 		return -1;
     }
+    //usleep(10000);
     return 0;
 }
 
@@ -105,15 +115,16 @@ static int write_header(const uint32_t start_addr, const uint32_t len, const uin
 	mdio_write(REG_DATA5, ((exec_addr & 0xffff0000) >> 16));
 	mdio_write(REG_DATA6, (exec_addr & 0x0000ffff));
 	mdio_write(REG_STATUS, CMD_SET_PARAMS);
+	usleep(10000);
 	mdio_read(REG_ZERO, &regval);
 	if(regval != RESP_OK) {
-		printf("Error writing header!\n");
-		return 1;
+		printf("Error writing header! REG_ZERO = %d\n", regval);
+		return -1;
 	}
 	mdio_read(REG_STATUS, &regval);
 	if(regval != RESP_OK) {
-		printf("Error writing header!\n");
-		return 1;
+		printf("Error writing header! REG_STATUS = %d\n", regval);
+		return -1;
 	}
 	return 0;
 }
@@ -125,15 +136,16 @@ static int write_checksum(const uint32_t checksum) {
 	mdio_write(REG_DATA3, 0x0000);
 	mdio_write(REG_DATA4, 0x0000);
 	mdio_write(REG_STATUS, CMD_SET_CHECKSUM);
+	usleep(10000);
 	mdio_read(REG_ZERO, &regval);
 	if(regval != RESP_OK) {
-		printf("Error writing checksum!\n");
-		return 1;
+		printf("Error writing checksum! REG_ZERO = %d\n", regval);
+		return -1;
 	}
 	mdio_read(REG_STATUS, &regval);
 	if(regval != RESP_OK) {
-		printf("Error writing checksum!\n");
-		return 1;
+		printf("Error writing checksum! REG_STATUS = %d\n", regval);
+		return -1;
 	}
 	return 0;
 }
@@ -183,16 +195,17 @@ static int write_chunk(const char *data, const int len) {
 	}
 	
 	mdio_write(REG_STATUS, CMD_SET_DATA);
-	
+	usleep(10000);
+
 	mdio_read(REG_ZERO, &regval);
 	if((regval != RESP_OK) && (regval != RESP_COMPLETED) && (regval != RESP_WAIT)) {
 		printf("Error writing chunk: REG_ZERO = 0x%x!\n", regval);
-		return 1;
+		return -1;
 	}
 	mdio_read(REG_STATUS, &regval);
 	if((regval != RESP_OK) && (regval != RESP_WAIT) && (regval != RESP_COMPLETED)) {
 		printf("Error writing chunk: REG_STATUS = 0x%x!\n", regval);
-		return 1;
+		return -1;
 	}
 	return 0;
 }
@@ -205,12 +218,6 @@ int main(int argc, char *argv[]) {
 	struct mii_ioctl_data *mii = (struct mii_ioctl_data *)&ifr.ifr_data;
   
 	printf("AVM WASP Stage 1 uploader.\n");
-	if(argc > 1) {
-		printf("Arguments:\n");
-		for(int i=1; i<argc; i++) {
-			printf("%s\n", argv[i]);
-		}
-	}
 	
 	if(argc < 3) {
 		printf("Usage: %s ath_tgt_fw1.bin eth0\n", argv[0]);
@@ -274,15 +281,17 @@ int main(int argc, char *argv[]) {
 	
 	mdio_write(REG_STATUS, CMD_START_FIRMWARE);
 	printf("Firmware start command sent.\n");
+	usleep(10000);
 
 	// FIXME: Timeout
 	mdio_read(REG_STATUS, &regval);
-	while(regval != RESP_UNKNOWN) {
+	while(regval != RESP_READY_TO_START) {
 		mdio_read(REG_STATUS, &regval);
 	}
 
 	mdio_write(REG_STATUS, CMD_START_FIRMWARE);
 	printf("Firmware start command sent.\n");	
+	usleep(10000);
 
 	// FIXME: Timeout
 	mdio_read(REG_STATUS, &regval);
@@ -293,31 +302,6 @@ int main(int argc, char *argv[]) {
 	write_chunk(mac_data, CHUNK_SIZE);
 	
 	printf("Firmware upload successful!\n");
-
-	// FIXME: Checksum calcuation is yet unknown
-	/*
-	FILE *fp = fopen(argv[1], "rb");
-
-	while(!feof(fp) && !ferror(fp)) {
-		read = fread(data, 1, sizeof(data), fp);
-		if(read > 0) {
-			dataC = (data[0] << 24) | (data[1] << 16) | (data[2] << 8) | data[3];
-			//printf("%08x\n", crc);
-			crc = crc ^ dataC;
-			for(int j=0; j<(int)read; j++) {
-				cs += data[j];
-			}
-			//printf("%08x\n", crc);
-		}
-	}
-	if(!ferror(fp)) {
-		printf("0x%08x\n", crc);
-		printf("0x%08x\n", cs);
-	}
-	fclose(fp);
-	*/
-	
-	
 
 	return 0;
 }
