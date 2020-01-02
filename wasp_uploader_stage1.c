@@ -34,6 +34,10 @@
 
 #define MDIO_ADDR	0x07
 
+#define WRITE_SLEEP_US 20000
+// 10 second timeout with above sleep time
+#define TIMEOUT_COUNT  500
+
 #define REG_ZERO	0x0
 #define REG_STATUS	0x700
 #define REG_DATA1	0x702
@@ -50,7 +54,6 @@
 #define RESP_COMPLETED		0x0000
 #define RESP_READY_TO_START	0x0202
 #define RESP_STARTING       0x00c9
-#define RESP_UNKNOWN        0x00ca
 
 #define CMD_SET_PARAMS		0x0c01
 #define CMD_SET_CHECKSUM	0x0801
@@ -102,7 +105,6 @@ static int mdio_write(int location, int value)
 		strerror(errno));
 		return -1;
     }
-    //usleep(10000);
     return 0;
 }
 
@@ -115,7 +117,7 @@ static int write_header(const uint32_t start_addr, const uint32_t len, const uin
 	mdio_write(REG_DATA5, ((exec_addr & 0xffff0000) >> 16));
 	mdio_write(REG_DATA6, (exec_addr & 0x0000ffff));
 	mdio_write(REG_STATUS, CMD_SET_PARAMS);
-	usleep(10000);
+	usleep(WRITE_SLEEP_US);
 	mdio_read(REG_ZERO, &regval);
 	if(regval != RESP_OK) {
 		printf("Error writing header! REG_ZERO = %d\n", regval);
@@ -136,7 +138,7 @@ static int write_checksum(const uint32_t checksum) {
 	mdio_write(REG_DATA3, 0x0000);
 	mdio_write(REG_DATA4, 0x0000);
 	mdio_write(REG_STATUS, CMD_SET_CHECKSUM);
-	usleep(10000);
+	usleep(WRITE_SLEEP_US);
 	mdio_read(REG_ZERO, &regval);
 	if(regval != RESP_OK) {
 		printf("Error writing checksum! REG_ZERO = %d\n", regval);
@@ -195,7 +197,7 @@ static int write_chunk(const char *data, const int len) {
 	}
 	
 	mdio_write(REG_STATUS, CMD_SET_DATA);
-	usleep(10000);
+	usleep(WRITE_SLEEP_US);
 
 	mdio_read(REG_ZERO, &regval);
 	if((regval != RESP_OK) && (regval != RESP_COMPLETED) && (regval != RESP_WAIT)) {
@@ -215,6 +217,7 @@ int main(int argc, char *argv[]) {
 	size_t read = 0;
 	off_t size;
 	int regval;
+	int count;
 	struct mii_ioctl_data *mii = (struct mii_ioctl_data *)&ifr.ifr_data;
   
 	printf("AVM WASP Stage 1 uploader.\n");
@@ -277,29 +280,45 @@ int main(int argc, char *argv[]) {
 	
 	printf("Done uploading firmware.\n");
 	
-	sleep(1);
+	usleep(15 * 100 * 1000); // 1.5 seconds
 	
 	mdio_write(REG_STATUS, CMD_START_FIRMWARE);
 	printf("Firmware start command sent.\n");
-	usleep(10000);
+	usleep(WRITE_SLEEP_US);
 
-	// FIXME: Timeout
+	count = 0;
 	mdio_read(REG_STATUS, &regval);
-	while(regval != RESP_READY_TO_START) {
+	// Timeout: 10 seconds
+	while((regval != RESP_READY_TO_START) && (count < TIMEOUT_COUNT)) {
 		mdio_read(REG_STATUS, &regval);
+		usleep(WRITE_SLEEP_US);
+		count++;
+	}
+	if(count == TIMEOUT_COUNT) {
+		printf("Timed out waiting for response.\n");
+		return 1;
 	}
 
 	mdio_write(REG_STATUS, CMD_START_FIRMWARE);
 	printf("Firmware start command sent.\n");	
-	usleep(10000);
+	usleep(WRITE_SLEEP_US);
 
-	// FIXME: Timeout
+	count = 0;
 	mdio_read(REG_STATUS, &regval);
-	while(regval != RESP_OK) {
+	while((regval != RESP_OK) && (count < 500)) {
 		mdio_read(REG_STATUS, &regval);
+		usleep(WRITE_SLEEP_US);
+		count++;
+	}
+	if(count == TIMEOUT_COUNT) {
+		printf("Timed out waiting for response.\n");
+		return 1;
 	}
 	
-	write_chunk(mac_data, CHUNK_SIZE);
+	if(write_chunk(mac_data, CHUNK_SIZE) < 0) {
+		printf("Error sending MAC address!\n");
+		return 1;
+	}
 	
 	printf("Firmware upload successful!\n");
 
