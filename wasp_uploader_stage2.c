@@ -37,15 +37,22 @@
 #define CMD_START_FIRMWARE	0xd400
 
 #define RESP_DISCOVER		0x0000
+#define RESP_CONFIG			0x1000
 #define RESP_OK				0x0100
 #define RESP_STARTING		0x0200
 #define RESP_ERROR			0x0300
 
+typedef enum {
+	DOWNLOAD_TYPE_UNKNOWN = 0,
+	DOWNLOAD_TYPE_FIRMWARE,
+	DOWNLOAD_TYPE_CONFIG
+} t_download_type;
+
 static const uint32_t m_load_addr = 0x81a00000;
 
-static const uint8_t wasp_mac[] = {0x00, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa};
+static uint8_t wasp_mac[] = {0x00, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa};
 static uint16_t m_packet_counter = 0;
-
+static t_download_type m_download_type = DOWNLOAD_TYPE_UNKNOWN;
 static int m_socket_initialized = 0;
 
 
@@ -153,27 +160,37 @@ int main(int argc, char *argv[]) {
 	t_wasp_packet *packet = (t_wasp_packet *) (buf + sizeof(struct ether_header));
 	t_wasp_packet s_packet;
 	FILE *fp = NULL;
+	char *fn;
 	ssize_t read;
 	int data_offset = 0;
 	int fsize;
+	int cfgsize;
 	int num_chunks;
 	int chunk_counter = 1;
 
 	printf("AVM WASP Stage 2 uploader.\n");
-	if(argc > 1) {
-		printf("Arguments:\n");
-		for(int i=1; i<argc; i++) {
-			printf("%s\n", argv[i]);
-		}
-	}
 	
 	if(argc < 3) {
-		printf("Usage: %s ath_tgt_fw2.bin eth0\n", argv[0]);
+		printf("Usage: %s ath_tgt_fw2.bin eth0 [config.tar.gz]\n", argv[0]);
 		return 1;
 	}
 	
-	printf("Using file: %s\n", argv[1]);
-	printf("Using Dev : %s\n", argv[2]);
+	printf("Using file  : %s\n", argv[1]);
+	printf("Using Dev   : %s\n", argv[2]);
+	
+	if(argc > 3) {
+		printf("Using config: %s\n", argv[3]);
+		
+		fp = fopen(argv[3], "rb");
+		if(fp == NULL) {
+			printf("Input file not found: %s\n", argv[3]);
+		}
+		fseek(fp, 0, SEEK_END);
+		cfgsize = ftell(fp);
+		fseek(fp, 0, SEEK_SET);
+		fclose(fp);
+		fp = NULL;
+	}
 	
 	fp = fopen(argv[1], "rb");
 	if(fp == NULL) {
@@ -184,13 +201,6 @@ int main(int argc, char *argv[]) {
 	fseek(fp, 0, SEEK_SET);
 	fclose(fp);
 	fp = NULL;
-	
-	num_chunks = fsize / CHUNK_SIZE;
-	if(fsize % CHUNK_SIZE != 0) {
-		num_chunks++;
-	}
-
-	printf("Going to send %d chunks.\n", num_chunks);
 
 	/* Header structures */
 	struct ether_header *eh = (struct ether_header *) buf;
@@ -228,17 +238,50 @@ int main(int argc, char *argv[]) {
 		numbytes = recvfrom(sockfd, buf, BUF_SIZE, 0, NULL, NULL);
 		//printf("listener: got packet %lu bytes\n", numbytes);	
 
+		if(numbytes < 30) {
+			printf("Packet too small, discarding\n");
+			continue;
+		}
+		/*
 		for(i=0; i<6; i++) {
 			if(eh->ether_shost[i] != wasp_mac[i])
 				valid = 0;
 		}
+		*/
+		
+		if(eh->ether_type != ETHER_TYPE)
+			valid = 0;
 		
 		if(!valid)
 			continue;
+			
+		for(i=0; i<6; i++) {
+			wasp_mac[i] = eh->ether_shost[i];
+		}
+		
 		
 		if((packet->packet_start == PACKET_START) && (packet->response == RESP_DISCOVER)) {
 			printf("Got discovery packet, starting firmware download...\n");
 			m_packet_counter = 0;
+			m_download_type = DOWNLOAD_TYPE_FIRMWARE;
+			fn = argv[1];
+			num_chunks = fsize / CHUNK_SIZE;
+			if(fsize % CHUNK_SIZE != 0) {
+				num_chunks++;
+			}
+
+			printf("Going to send %d chunks.\n", num_chunks);
+		} else if((packet->packet_start == PACKET_START) && (packet->response == RESP_CONFIG)) {
+			printf("Got config discovery packet, starting config download...\n");
+			m_packet_counter = 0;
+			m_download_type = DOWNLOAD_TYPE_CONFIG;
+			fn = argv[3];
+			num_chunks = cfgsize / CHUNK_SIZE;
+			if(cfgsize % CHUNK_SIZE != 0) {
+				num_chunks++;
+			}
+
+			printf("Going to send %d chunks.\n", num_chunks);
 		} else if((packet->packet_start == PACKET_START) && (packet->response == RESP_OK)) {
 			memset(&s_packet, 0, sizeof(s_packet));
 
@@ -249,7 +292,9 @@ int main(int argc, char *argv[]) {
 			continue;
 		} else if((packet->packet_start == PACKET_START) && (packet->response == RESP_STARTING)) {
 			printf("Successfully uploaded stage 2 firmware!\n");
-			done = 1;
+			if(argc <= 3) {
+				done = 1;
+			}
 			continue;
 		} else {
 			printf("Got unknown packet!\n");
@@ -258,13 +303,17 @@ int main(int argc, char *argv[]) {
 		if(m_packet_counter == 0) {
 			//printf("Sending first chunk!\n");
 			if(fp == NULL) {
-				fp = fopen(argv[1], "rb");
+				fp = fopen(fn, "rb");
 			}
 			else {
 				fseek(fp, 0, SEEK_SET);
 			}
-			memcpy(s_packet.payload, &m_load_addr, sizeof(m_load_addr));
-			data_offset = sizeof(m_load_addr);
+			if(m_download_type == DOWNLOAD_TYPE_FIRMWARE) {
+				memcpy(s_packet.payload, &m_load_addr, sizeof(m_load_addr));
+				data_offset = sizeof(m_load_addr);
+			} else {
+				data_offset = 0;
+			}
 		} else {
 			data_offset = 0;
 		}
@@ -274,8 +323,10 @@ int main(int argc, char *argv[]) {
 			if(chunk_counter == num_chunks) {
 				//printf("Sending last chunk!\n");
 				s_packet.response = CMD_START_FIRMWARE;
-				memcpy(&s_packet.payload[data_offset + read], &m_load_addr, sizeof(m_load_addr));
-				data_offset += sizeof(m_load_addr);
+				if(m_download_type == DOWNLOAD_TYPE_FIRMWARE) {
+					memcpy(&s_packet.payload[data_offset + read], &m_load_addr, sizeof(m_load_addr));
+					data_offset += sizeof(m_load_addr);
+				}
 			} else {
 				s_packet.command = CMD_FIRMWARE_DATA;
 			}
@@ -289,6 +340,7 @@ int main(int argc, char *argv[]) {
 		} else {
 			//printf("EOF\n");
 			fclose(fp);
+			fp = NULL;
 		}
 	}
 	if(fp)
