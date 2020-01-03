@@ -299,8 +299,10 @@ int main(int argc, char *argv[]) {
 				printf("Successfully uploaded config file!\n");
 				done = 1;
 			}
-			if(fp)
+			if(fp) {
 				fclose(fp);
+				fp = NULL;
+			}
 			if(argc <= 3) {
 				done = 1;
 			}
