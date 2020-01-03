@@ -265,6 +265,7 @@ int main(int argc, char *argv[]) {
 			m_packet_counter = 0;
 			m_download_type = DOWNLOAD_TYPE_FIRMWARE;
 			fn = argv[1];
+			chunk_counter = 1;
 			num_chunks = fsize / CHUNK_SIZE;
 			if(fsize % CHUNK_SIZE != 0) {
 				num_chunks++;
@@ -276,6 +277,7 @@ int main(int argc, char *argv[]) {
 			m_packet_counter = 0;
 			m_download_type = DOWNLOAD_TYPE_CONFIG;
 			fn = argv[3];
+			chunk_counter = 1;
 			num_chunks = cfgsize / CHUNK_SIZE;
 			if(cfgsize % CHUNK_SIZE != 0) {
 				num_chunks++;
@@ -291,7 +293,14 @@ int main(int argc, char *argv[]) {
 			done = 1;
 			continue;
 		} else if((packet->packet_start == PACKET_START) && (packet->response == RESP_STARTING)) {
-			printf("Successfully uploaded stage 2 firmware!\n");
+			if(m_download_type == DOWNLOAD_TYPE_FIRMWARE) {
+				printf("Successfully uploaded stage 2 firmware!\n");
+			} else {
+				printf("Successfully uploaded config file!\n");
+				done = 1;
+			}
+			if(fp)
+				fclose(fp);
 			if(argc <= 3) {
 				done = 1;
 			}
