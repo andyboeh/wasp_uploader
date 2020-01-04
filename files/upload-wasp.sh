@@ -6,28 +6,21 @@
 WASP=/opt/wasp
 
 extract_eeprom() {
-  local reversed
   local mtd
-  local offset=0x985
+  local offset=$((0x985))
   local count=$((0x1000))
-  local lan_mac
-  local wifi_mac
 
   if [ ! -e "${WASP}/files/lib/firmware/ath9k-eeprom-pci-0000:00:00.0.bin" ]; then
     mkdir -p "${WASP}/files/lib/firmware"
     mtd=$(find_mtd_chardev "urlader")
-    reversed=$(hexdump -v -s $offset -n $count -e '/1 "%02x "' $mtd)
     
-    for byte in $reversed; do
-      caldata="\x${byte}${caldata}"
-    done
-
-    printf "%b" "$caldata" > "${WASP}/files/lib/firmware/ath9k-eeprom-pci-0000:00:00.0.bin"
+    dd if=$mtd of="${WASP}/files/lib/firmware/ath9k-eeprom-pci-0000:00:00.0.bin" iflag=skip_bytes bs=$count skip=$offset count=1
   fi
 }
 
 check_config() {
   local lan_mac
+  local wifi_mac
   local r1
   local r2
   local r3
