@@ -259,6 +259,7 @@ int main(int argc, char *argv[]) {
 			wasp_mac[i] = eh->ether_shost[i];
 		}
 		
+		memset(&s_packet, 0, sizeof(s_packet));
 		
 		if((packet->packet_start == PACKET_START) && (packet->response == RESP_DISCOVER)) {
 			printf("Got discovery packet, starting firmware download...\n");
@@ -285,7 +286,6 @@ int main(int argc, char *argv[]) {
 
 			printf("Going to send %d chunks.\n", num_chunks);
 		} else if((packet->packet_start == PACKET_START) && (packet->response == RESP_OK)) {
-			memset(&s_packet, 0, sizeof(s_packet));
 
 			//printf("Got reply, sending next chunk...\n");
 		} else if((packet->packet_start == PACKET_START) && (packet->response == RESP_ERROR)) {
@@ -312,7 +312,6 @@ int main(int argc, char *argv[]) {
 			continue;
 		}
 		if(m_packet_counter == 0) {
-			//printf("Sending first chunk!\n");
 			if(fp == NULL) {
 				fp = fopen(fn, "rb");
 			}
@@ -332,7 +331,6 @@ int main(int argc, char *argv[]) {
 			read = fread(&s_packet.payload[data_offset], 1, CHUNK_SIZE, fp);
 			s_packet.packet_start = PACKET_START;
 			if(chunk_counter == num_chunks) {
-				//printf("Sending last chunk!\n");
 				s_packet.response = CMD_START_FIRMWARE;
 				if(m_download_type == DOWNLOAD_TYPE_FIRMWARE) {
 					memcpy(&s_packet.payload[data_offset + read], &m_load_addr, sizeof(m_load_addr));
