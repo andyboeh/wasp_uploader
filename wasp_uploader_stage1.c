@@ -62,7 +62,6 @@
 
 static const uint32_t start_addr = 0xbd003000;
 static const uint32_t exec_addr = 0xbd003000;
-static const uint32_t checksum_static = 0x6a83ffc7;
 
 static int skfd = -1;		/* AF_INET socket for ioctl() calls. */
 static struct ifreq ifr;
@@ -212,7 +211,31 @@ static int write_chunk(const char *data, const int len) {
 	return 0;
 }
 
+static uint32_t calc_checksum(const char *filename) {
+	uint32_t checksum = 0xffffffff;
+	uint32_t cs;
+	uint8_t data[4];
+	size_t read = 0;
+	int count = -1;
+
+	FILE *fp = fopen(filename, "rb");
+	while(!feof(fp)) {
+		read = fread(data, 1, 4, fp);
+		if(read == 0) {
+			break;
+		}
+		cs = (data[0] << 24 | data[1] << 16 | data[2] << 8 | data[3]);
+		checksum = checksum - cs;
+		count++;
+	}
+	fclose(fp);
+
+	checksum = checksum - count;
+	return checksum;
+}
+
 int main(int argc, char *argv[]) {
+	uint32_t checksum;
 	char data[CHUNK_SIZE];
 	size_t read = 0;
 	off_t size;
@@ -241,6 +264,10 @@ int main(int argc, char *argv[]) {
 		return 1;
 	}
 
+	checksum = calc_checksum(argv[1]);
+
+	printf("Checksum       : 0x%8x\n", checksum);
+
 	/* Open a basic socket. */
 	if ((skfd = socket(AF_INET, SOCK_DGRAM,0)) < 0) {
 		perror("socket");
@@ -265,7 +292,7 @@ int main(int argc, char *argv[]) {
 	if(write_header(start_addr, size, exec_addr) < 0)
 		return 1;
 
-	if(write_checksum(checksum_static) < 0)
+	if(write_checksum(checksum) < 0)
 		return 1;
 
 	FILE *fp = fopen(argv[1], "rb");
