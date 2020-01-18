@@ -23,6 +23,8 @@
 #include <net/if.h>
 #include <netinet/ether.h>
 #include <unistd.h>
+#include <getopt.h>
+#include <libgen.h>
 
 #define ETHER_TYPE 			0x88bd
 #define BUF_SIZE			1056
@@ -54,6 +56,12 @@ static uint8_t wasp_mac[] = {0x00, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa};
 static uint16_t m_packet_counter = 0;
 static t_download_type m_download_type = DOWNLOAD_TYPE_UNKNOWN;
 static int m_socket_initialized = 0;
+
+static char *opt_iface;
+static char *opt_filename;
+static char *opt_config;
+static char *progname;
+static int opt_verbose = 0;
 
 
 typedef struct __attribute__((packed)) {
@@ -138,14 +146,52 @@ static int send_packet(t_wasp_packet *packet, int payloadlen, char *devname) {
 		socket_address.sll_addr[i] = wasp_mac[i];
 	}
 
+	if(opt_verbose) {
+		printf("Send (%d bytes): ", tx_len);
+		for(int i=0; i<tx_len; i++) {
+			printf("0x%x ", sendbuf[i]);
+		}
+		printf("\n");
+	}
+
 	/* Send packet */
 	if (sendto(sockfd, sendbuf, tx_len, 0, (struct sockaddr*)&socket_address, sizeof(struct sockaddr_ll)) < 0) {
-		printf("Send failed\n");
+		fprintf(stderr, "Send failed\n");
 		return 1;
 	}
 
 	return 0;
 
+}
+
+static int check_options(void) {
+	if(!opt_filename) {
+		fprintf(stderr, "No input filename specified.\n");
+		return -1;
+	}
+
+	if(!opt_iface) {
+		fprintf(stderr, "No interface specified.\n");
+		return -1;
+	}
+
+	return 0;
+}
+
+static void usage(int status)
+{
+	fprintf(stderr, "Usage: %s [OPTIONS...]\n", progname);
+	fprintf(stderr,
+"\n"
+"Options:\n"
+"  -i <interface>  use the specified Ethernet interface\n"
+"  -f <file>       upload the specified firmware file\n"
+"  -c <file>       upload the optional config file\n"
+"  -v              verbose output\n"
+"  -h              show this screen\n"
+	);
+
+	exit(status);
 }
 
 int main(int argc, char *argv[]) {
@@ -167,23 +213,60 @@ int main(int argc, char *argv[]) {
 	int cfgsize;
 	int num_chunks;
 	int chunk_counter = 1;
+	progname = basename(argv[0]);
+	int ret = EXIT_FAILURE;
+	
+	while(1) {
+		int c;
+
+		c = getopt(argc, argv, "i:f:c:hv");
+		if(c == -1)
+			break;
+
+		switch(c) {
+		
+		case 'i':
+			opt_iface = optarg;
+			break;
+
+		case 'f':
+			opt_filename = optarg;
+			break;
+
+		case 'c':
+			opt_config = optarg;
+			break;
+
+		case 'v':
+			opt_verbose = 1;
+			break;
+
+		case 'h':
+			usage(EXIT_SUCCESS);
+			break;
+
+		default:
+			usage(EXIT_FAILURE);
+			break;
+		}
+	}
+	
+	ret = check_options();
+	if(ret)
+		return ret;
+
+
 
 	printf("AVM WASP Stage 2 uploader.\n");
 	
-	if(argc < 3) {
-		printf("Usage: %s ath_tgt_fw2.bin eth0 [config.tar.gz]\n", argv[0]);
-		return 1;
-	}
-	
-	printf("Using file  : %s\n", argv[1]);
-	printf("Using Dev   : %s\n", argv[2]);
-	
-	if(argc > 3) {
-		printf("Using config: %s\n", argv[3]);
+	printf("Using file  : %s\n", opt_filename);
+	printf("Using Dev   : %s\n", opt_iface);
+	if(opt_config) {
+		printf("Using config: %s\n", opt_config);
 		
-		fp = fopen(argv[3], "rb");
+		fp = fopen(opt_config, "rb");
 		if(fp == NULL) {
-			printf("Input file not found: %s\n", argv[3]);
+			printf("Input file not found: %s\n", opt_config);
 		}
 		fseek(fp, 0, SEEK_END);
 		cfgsize = ftell(fp);
@@ -192,9 +275,9 @@ int main(int argc, char *argv[]) {
 		fp = NULL;
 	}
 	
-	fp = fopen(argv[1], "rb");
+	fp = fopen(opt_filename, "rb");
 	if(fp == NULL) {
-		printf("Input file not found: %s\n", argv[1]);
+		printf("Input file not found: %s\n", opt_filename);
 	}
 	fseek(fp, 0, SEEK_END);
 	fsize = ftell(fp);
@@ -213,7 +296,7 @@ int main(int argc, char *argv[]) {
 		return -1;
 	}
 	
-	strncpy(ifopts.ifr_name, argv[2], IFNAMSIZ-1);
+	strncpy(ifopts.ifr_name, opt_iface, IFNAMSIZ-1);
 	ioctl(sockfd, SIOCGIFFLAGS, &ifopts);
 	ifopts.ifr_flags |= IFF_PROMISC;
 	ioctl(sockfd, SIOCSIFFLAGS, &ifopts);
@@ -226,7 +309,7 @@ int main(int argc, char *argv[]) {
 	}
 
 	/* Bind to device */
-	if (setsockopt(sockfd, SOL_SOCKET, SO_BINDTODEVICE, argv[2], IFNAMSIZ-1) == -1)	{
+	if (setsockopt(sockfd, SOL_SOCKET, SO_BINDTODEVICE, opt_iface, IFNAMSIZ-1) == -1)	{
 		perror("SO_BINDTODEVICE");
 		close(sockfd);
 		exit(EXIT_FAILURE);
@@ -234,20 +317,19 @@ int main(int argc, char *argv[]) {
 
 	//FIXME: Timeout
 	while(!done) {
-		//printf("listener: Waiting to recvfrom...\n");
 		numbytes = recvfrom(sockfd, buf, BUF_SIZE, 0, NULL, NULL);
-		//printf("listener: got packet %lu bytes\n", numbytes);	
+		if(opt_verbose) {
+			printf("Recv (%d bytes): ", numbytes);
+			for(int i=0; i<numbytes; i++) {
+				printf("0x%x ", buf[i]);
+			}
+			printf("\n");
+		}
 
 		if(numbytes < 30) {
-			printf("Packet too small, discarding\n");
+			fprintf(stderr, "Packet too small, discarding\n");
 			continue;
 		}
-		/*
-		for(i=0; i<6; i++) {
-			if(eh->ether_shost[i] != wasp_mac[i])
-				valid = 0;
-		}
-		*/
 		
 		if(eh->ether_type != ETHER_TYPE)
 			valid = 0;
@@ -262,34 +344,37 @@ int main(int argc, char *argv[]) {
 		memset(&s_packet, 0, sizeof(s_packet));
 		
 		if((packet->packet_start == PACKET_START) && (packet->response == RESP_DISCOVER)) {
-			printf("Got discovery packet, starting firmware download...\n");
+			if(opt_verbose)
+				printf("Got discovery packet, starting firmware download...\n");
 			m_packet_counter = 0;
 			m_download_type = DOWNLOAD_TYPE_FIRMWARE;
-			fn = argv[1];
+			fn = opt_filename;
 			chunk_counter = 1;
 			num_chunks = fsize / CHUNK_SIZE;
 			if(fsize % CHUNK_SIZE != 0) {
 				num_chunks++;
 			}
-
-			printf("Going to send %d chunks.\n", num_chunks);
+			if(opt_verbose)
+				printf("Going to send %d chunks.\n", num_chunks);
 		} else if((packet->packet_start == PACKET_START) && (packet->response == RESP_CONFIG)) {
-			printf("Got config discovery packet, starting config download...\n");
+			if(opt_verbose)
+				printf("Got config discovery packet, starting config download...\n");
 			m_packet_counter = 0;
 			m_download_type = DOWNLOAD_TYPE_CONFIG;
-			fn = argv[3];
+			fn = opt_config;
 			chunk_counter = 1;
 			num_chunks = cfgsize / CHUNK_SIZE;
 			if(cfgsize % CHUNK_SIZE != 0) {
 				num_chunks++;
 			}
 
-			printf("Going to send %d chunks.\n", num_chunks);
+			if(opt_verbose)
+				printf("Going to send %d chunks.\n", num_chunks);
 		} else if((packet->packet_start == PACKET_START) && (packet->response == RESP_OK)) {
 
 			//printf("Got reply, sending next chunk...\n");
 		} else if((packet->packet_start == PACKET_START) && (packet->response == RESP_ERROR)) {
-			printf("Received an error packet!\n");
+			fprintf(stderr, "Received an error packet!\n");
 			done = 1;
 			continue;
 		} else if((packet->packet_start == PACKET_START) && (packet->response == RESP_STARTING)) {
@@ -303,12 +388,12 @@ int main(int argc, char *argv[]) {
 				fclose(fp);
 				fp = NULL;
 			}
-			if(argc <= 3) {
+			if(!opt_config) {
 				done = 1;
 			}
 			continue;
 		} else {
-			printf("Got unknown packet!\n");
+			fprintf(stderr, "Got unknown packet!\n");
 			continue;
 		}
 		if(m_packet_counter == 0) {
@@ -340,14 +425,13 @@ int main(int argc, char *argv[]) {
 				s_packet.command = CMD_FIRMWARE_DATA;
 			}
 			s_packet.counter = m_packet_counter;
-			if(send_packet(&s_packet, read + data_offset, argv[2]) != 0) {
-				printf("Error sending packet.\n");
+			if(send_packet(&s_packet, read + data_offset, opt_iface) != 0) {
+				fprintf(stderr, "Error sending packet.\n");
 				continue;
 			}
 			m_packet_counter += COUNTER_INCR;
 			chunk_counter++;
 		} else {
-			//printf("EOF\n");
 			fclose(fp);
 			fp = NULL;
 		}
