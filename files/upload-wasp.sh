@@ -1,20 +1,48 @@
 #!/bin/sh
 
+. /lib/functions.sh
 . /lib/functions/system.sh
 . /lib/functions/caldata.sh
 
 WASP=/opt/wasp
+BOARD=$(board_name)
+MODEL=generic
+
+case "${BOARD}" in                                                                                                                                           
+        avm,fritz3390)                                                                                                                                       
+                echo "Working on AVM FRITZ!Box 3390"                                                                                                         
+                MODEL=3390                                                                                                                                   
+        ;;                                                                                                                                                   
+        avm,fritz3490)                                                                                                                                       
+                echo "Working on AVM FRITZ!Box 3490"                                                                                                         
+                MODEL=3490                                                                                                                                   
+        ;;                                                                                                                                                   
+        *)                                                                                                                                                       
+                echo "Unknown board detected, aborting."                                                                                                         
+                exit 1                                                                                                                                           
+        ;;                                                                                                                                                       
+esac         
 
 extract_eeprom() {
   local mtd
   local offset=$((0x985))
   local count=$((0x1000))
+  local file
 
-  if [ ! -e "${WASP}/files/lib/firmware/ath9k-eeprom-pci-0000:00:00.0.bin" ]; then
+  case "${BOARD}" in
+	avm,fritz3390)
+		file="${WASP}/files/lib/firmware/ath9k-eeprom-pci-0000:00:00.0.bin"
+	;;
+	avm,fritz3490)
+		file="${WASP}/files/lib/firmware/ath9k-eeprom-ahb-18100000.wmac.bin"
+		# FIXME: ath10k firmware extraction
+	;;
+  esac
+  if [ ! -e "${file}" ]; then
     mkdir -p "${WASP}/files/lib/firmware"
     mtd=$(find_mtd_chardev "urlader")
-    
-    dd if=$mtd of="${WASP}/files/lib/firmware/ath9k-eeprom-pci-0000:00:00.0.bin" iflag=skip_bytes bs=$count skip=$offset count=1
+
+    dd if=$mtd of="${file}" iflag=skip_bytes bs=$count skip=$offset count=1
   fi
 }
 
@@ -103,9 +131,9 @@ build_config() {
 }
 
 reset_wasp() {
-  echo 0 > /sys/class/gpio/fritz3390\:wasp\:reset/value
+  echo 0 > /sys/class/gpio/fritz${MODEL}\:wasp\:reset/value
   sleep 1
-  echo 1 > /sys/class/gpio/fritz3390\:wasp\:reset/value
+  echo 1 > /sys/class/gpio/fritz${MODEL}\:wasp\:reset/value
   sleep 1
 }
 
@@ -120,11 +148,11 @@ if [ ! -e "${WASP}/ath_tgt_fw1.fw" ]; then
   exit 1
 fi
 
-if [ ! -e "${WASP}/openwrt-ath79-generic-avm_fritz3390_wasp-initramfs-kernel.bin" ]; then
-  echo "${WASP}/openwrt-ath79-generic-avm_fritz3390_wasp-initramfs-kernel.bin not found. Please download it from the OpenWrt website and place it in ${WASP}"
-  exit 1
-fi
+if [ ! -e "${WASP}/openwrt-ath79-generic-avm_fritz${MODEL}_wasp-initramfs-kernel.bin" ]; then                                                                    
+  echo "${WASP}/openwrt-ath79-generic-avm_fritz${MODEL}_wasp-initramfs-kernel.bin not found. Please download it from the OpenWrt website and place it in ${WASP}"
+  exit 1                                                                                                                            
+fi   
 
 reset_wasp
-wasp_uploader_stage1 "${WASP}/ath_tgt_fw1.fw" eth0
-wasp_uploader_stage2 "${WASP}/openwrt-ath79-generic-avm_fritz3390_wasp-initramfs-kernel.bin" eth0.1 "${WASP}/config.tar.gz"
+wasp_uploader_stage1 -f "${WASP}/ath_tgt_fw1.fw" -i eth0 -m ${MODEL}
+wasp_uploader_stage2 -f "${WASP}/openwrt-ath79-generic-avm_fritz${MODEL}_wasp-initramfs-kernel.bin" -i eth0.1 -c "${WASP}/config.tar.gz"
