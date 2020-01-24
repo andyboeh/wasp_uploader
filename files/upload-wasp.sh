@@ -8,47 +8,76 @@ WASP=/opt/wasp
 BOARD=$(board_name)
 MODEL=generic
 
-case "${BOARD}" in                                                                                                                                           
-        avm,fritz3390)                                                                                                                                       
-                echo "Working on AVM FRITZ!Box 3390"                                                                                                         
-                MODEL=3390                                                                                                                                   
-        ;;                                                                                                                                                   
-        avm,fritz3490)                                                                                                                                       
-                echo "Working on AVM FRITZ!Box 3490"                                                                                                         
-                MODEL=3490                                                                                                                                   
-        ;;                                                                                                                                                   
-        *)                                                                                                                                                       
-                echo "Unknown board detected, aborting."                                                                                                         
-                exit 1                                                                                                                                           
-        ;;                                                                                                                                                       
-esac         
-
-extract_eeprom() {
-  local mtd
-  local offset=$((0x985))
-  local count=$((0x1000))
-  local file
-
-  case "${BOARD}" in
+case "${BOARD}" in
 	avm,fritz3390)
-		file="${WASP}/files/lib/firmware/ath9k-eeprom-pci-0000:00:00.0.bin"
+		echo "Working on AVM FRITZ!Box 3390"
+		MODEL=3390
 	;;
 	avm,fritz3490)
-		file="${WASP}/files/lib/firmware/ath9k-eeprom-ahb-18100000.wmac.bin"
-		# FIXME: ath10k firmware extraction
-	;;
-  esac
+		echo "Working on AVM FRITZ!Box 3490"
+		MODEL=3490
+		;;
+	*)
+		echo "Unknown board detected, aborting."
+		exit 1
+        ;;
+esac
+
+do_extract_eeprom_reverse() {
+  local offset=$(($2))
+  local count=$(($3))
+  local mtd=$1
+  local file=$4
+  local reversed
+  local caldata
+
   if [ ! -e "${file}" ]; then
-    mkdir -p "${WASP}/files/lib/firmware"
-    mtd=$(find_mtd_chardev "urlader")
+    mkdir -p $(dirname "${file}")
+
+    reversed=$(hexdump -v -s $offset -n $count -e '/1 "%02x "' $mtd)
+
+    for byte in $reversed; do
+      caldata="\x${byte}${caldata}"
+    done
+
+    printf "%b" "$caldata" > "${file}"
+  fi
+}
+
+do_extract_eeprom() {
+  local mtd=$1
+  local offset=$(($2))
+  local count=$(($3))
+  local file=$4
+
+  if [ ! -e "${file}" ]; then
+    mkdir -p $(dirname "${file}")
 
     dd if=$mtd of="${file}" iflag=skip_bytes bs=$count skip=$offset count=1
   fi
 }
 
+extract_eeprom() {
+  local mtd
+
+  mtd=$(find_mtd_chardev "urlader")
+
+  case "${BOARD}" in
+	avm,fritz3390)
+		do_extract_eeprom_reverse ${mtd} 0x1541 0x440 "${WASP}/files/lib/firmware/ath9k-eeprom-pci-0000:00:00.0.bin"
+	;;
+	avm,fritz3490)
+		do_extract_eeprom_reverse ${mtd} 0x1541 0x440 "${WASP}/files/lib/firmware/ath9k-eeprom-ahb-18100000.wmac.bin"
+		do_extract_eeprom ${mtd} 0x198A 0x844 "${WASP}/files/lib/firmware/ath10k/cal-pci-0000:00:00.0.bin"
+	;;
+  esac
+
+}
+
 check_config() {
   local lan_mac
   local wifi_mac
+  local wifi_mac2
   local r1
   local r2
   local r3
@@ -87,9 +116,10 @@ EOF
   if [ ! -e "${WASP}/files/etc/config/wireless" ] ; then
     mkdir -p "${WASP}/files/etc/config"
 
-    wifi_mac=$(fritz_tffs -n macwlan -i $(find_mtd_part "tffs (1)"))
-
-    cat << EOF >> "${WASP}/files/etc/config/wireless"
+    case "${BOARD}" in
+    avm,fritz3390)
+      wifi_mac=$(fritz_tffs -n macwlan -i $(find_mtd_part "tffs (1)"))
+      cat << EOF >> "${WASP}/files/etc/config/wireless"
 config wifi-device 'radio0'
 	option type 'mac80211'
 	option channel '11'
@@ -106,6 +136,13 @@ config wifi-iface 'default_radio0'
 	option encryption 'none'
 	option macaddr '$wifi_mac'
 EOF
+    ;;
+    avm,fritz3490)
+      wifi_mac=$(fritz_tffs -n macwlan -i $(find_mtd_part "tffs (1)"))
+      wifi_mac2=$(fritz_tffs -n macwlan2 -i $(find_mtd_part "tffs (1)"))
+
+    ;;
+  esac
 
   fi
 
