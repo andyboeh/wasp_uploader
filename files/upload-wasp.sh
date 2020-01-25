@@ -185,11 +185,24 @@ if [ ! -e "${WASP}/ath_tgt_fw1.fw" ]; then
   exit 1
 fi
 
-if [ ! -e "${WASP}/openwrt-ath79-generic-avm_fritz${MODEL}_wasp-initramfs-kernel.bin" ]; then                                                                    
-  echo "${WASP}/openwrt-ath79-generic-avm_fritz${MODEL}_wasp-initramfs-kernel.bin not found. Please download it from the OpenWrt website and place it in ${WASP}"
+if [ ! -e "${WASP}/openwrt-ath79-generic-avm_fritzbox-${MODEL}-wasp-initramfs-kernel.bin" ]; then
+  echo "${WASP}/openwrt-ath79-generic-avm_fritzbox-${MODEL}-wasp-initramfs-kernel.bin not found. Please download it from the OpenWrt website and place it in ${WASP}"
   exit 1                                                                                                                            
 fi   
 
 reset_wasp
-wasp_uploader_stage1 -f "${WASP}/ath_tgt_fw1.fw" -i eth0 -m ${MODEL}
-wasp_uploader_stage2 -f "${WASP}/openwrt-ath79-generic-avm_fritz${MODEL}_wasp-initramfs-kernel.bin" -i eth0.1 -c "${WASP}/config.tar.gz"
+n=0
+until [ $n -ge 5 ]; do
+  wasp_uploader_stage1 -f "${WASP}/ath_tgt_fw1.fw" -i eth0 -m ${MODEL} && break
+  n=$[$n+1]
+done
+if [ $n -ge 5 ]; then
+  echo "Error uploading stage 1 firmware"
+  exit 1
+fi
+
+n=0
+until [ $n -ge 5 ]; do
+  wasp_uploader_stage2 -f "${WASP}/openwrt-ath79-generic-avm_fritzbox-${MODEL}-wasp-initramfs-kernel.bin" -i eth0.1 -c "${WASP}/config.tar.gz" && break
+  n=$[$n+1]
+done
