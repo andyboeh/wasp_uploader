@@ -319,7 +319,7 @@ int main(int argc, char *argv[]) {
 	while(!done) {
 		numbytes = recvfrom(sockfd, buf, BUF_SIZE, 0, NULL, NULL);
 		if(opt_verbose) {
-			printf("Recv (%d bytes): ", numbytes);
+			printf("Recv (%ld bytes): ", numbytes);
 			for(int i=0; i<numbytes; i++) {
 				printf("0x%x ", buf[i]);
 			}

@@ -143,23 +143,25 @@ static int write_header(const uint32_t start_addr, const uint32_t len, const uin
 	mdio_write(m_reg_status, CMD_SET_PARAMS);
 
 	if(m_model == MODEL_3390) {
-		mdio_read(m_reg_zero, &regval);
+		do {
+			usleep(POLL_SLEEP_US);
+			mdio_read(m_reg_zero, &regval);
+			timeout--;
+		} while((regval != RESP_OK) && (timeout > 0));
+
 		if(regval != RESP_OK) {
 			printf("Error writing header! m_reg_zero = %d\n", regval);
 			return -1;
 		}
-		usleep(WRITE_SLEEP_US);
 	}
 
-	if(m_model == MODEL_3490) {
-		do {
-			usleep(POLL_SLEEP_US);
-			mdio_read(m_reg_status, &regval);
-			timeout--;
-		} while((regval != RESP_OK) && (timeout > 0));
-	} else {
+	timeout = MDIO_TIMEOUT_COUNT;
+	do {
+		usleep(POLL_SLEEP_US);
 		mdio_read(m_reg_status, &regval);
-	}
+		timeout--;
+	} while((regval != RESP_OK) && (timeout > 0));
+	
 	if(regval != RESP_OK) {
 		printf("Error writing header! m_reg_status = 0x%x\n", regval);
 		return -1;
@@ -181,23 +183,26 @@ static int write_checksum(const uint32_t checksum) {
 	}
 
 	if(m_model == MODEL_3390) {
-		usleep(WRITE_SLEEP_US);
-		mdio_read(m_reg_zero, &regval);
+		do {
+			usleep(POLL_SLEEP_US);
+			mdio_read(m_reg_zero, &regval);
+			timeout--;
+		} while((regval != RESP_OK) && (timeout > 0));
+
 		if(regval != RESP_OK) {
 			printf("Error writing checksum! m_reg_zero = %d\n", regval);
 			return -1;
 		}
 	}
 
-	if(m_model == MODEL_3490) {
-		do {
-			usleep(POLL_SLEEP_US);
-			mdio_read(m_reg_status, &regval);
-			timeout--;
-		} while((regval != RESP_OK) && (timeout > 0));
-	} else {
+
+	timeout = MDIO_TIMEOUT_COUNT;
+	do {
+		usleep(POLL_SLEEP_US);
 		mdio_read(m_reg_status, &regval);
-	}
+		timeout--;
+	} while((regval != RESP_OK) && (timeout > 0));
+
 	if(regval != RESP_OK) {
 		printf("Error writing checksum! m_reg_status = %d\n", regval);
 		return -1;
@@ -253,23 +258,26 @@ static int write_chunk(const char *data, const int len) {
 	mdio_write(m_reg_status, CMD_SET_DATA);
 
 	if(m_model == MODEL_3390) {
-		usleep(WRITE_SLEEP_US);
-		mdio_read(m_reg_zero, &regval);
+		do {
+			usleep(POLL_SLEEP_US);
+			mdio_read(m_reg_zero, &regval);
+					timeout--;
+		} while((regval != RESP_OK) && (timeout > 0));
+
 		if((regval != RESP_OK) && (regval != RESP_COMPLETED) && (regval != RESP_WAIT)) {
 			printf("Error writing chunk: m_reg_zero = 0x%x!\n", regval);
 			return -1;
 		}
 	}
 
-	if(m_model == MODEL_3490) {
-		do {
-			usleep(POLL_SLEEP_US);
-			mdio_read(m_reg_status, &regval);
-			timeout--;
-		} while((regval != RESP_OK) && (timeout > 0));
-	} else {
+
+	timeout = MDIO_TIMEOUT_COUNT;
+	do {
+		usleep(POLL_SLEEP_US);
 		mdio_read(m_reg_status, &regval);
-	}
+		timeout--;
+	} while((regval != RESP_OK) && (timeout > 0));
+
 	if((regval != RESP_OK) && (regval != RESP_WAIT) && (regval != RESP_COMPLETED)) {
 		printf("Error writing chunk: m_reg_status = 0x%x!\n", regval);
 		return -1;
@@ -477,14 +485,14 @@ int main(int argc, char *argv[]) {
 	if(m_model == MODEL_3490) {
 		mdio_write(m_reg_status, CMD_START_FIRMWARE_3490);
 	} else if(m_model == MODEL_3390) {
-		usleep(15 * 100 * 1000); // 1.5 seconds
+		//usleep(15 * 100 * 1000); // 1.5 seconds
 		mdio_write(m_reg_status, CMD_START_FIRMWARE_3390);
 	}
 
 	printf("Firmware start command sent.\n");
-	if(m_model == MODEL_3390) {
-		usleep(WRITE_SLEEP_US);
-	}
+	//if(m_model == MODEL_3390) {
+	//	usleep(WRITE_SLEEP_US);
+	//}
 
 	count = 0;
 	mdio_read(m_reg_status, &regval);
@@ -508,8 +516,6 @@ int main(int argc, char *argv[]) {
 	printf("Firmware start command sent.\n");	
 	usleep(WRITE_SLEEP_US);
 
-
-	
 	if(m_model == MODEL_3490) {
 		cont = 1;
 		while(cont) {
