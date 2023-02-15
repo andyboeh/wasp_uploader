@@ -8,6 +8,7 @@
  *            has to be used, not eth0!
  *
  * (c) 2019 Andreas Böhler
+ * GPLv2
  */
 
 

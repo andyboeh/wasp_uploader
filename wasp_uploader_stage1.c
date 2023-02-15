@@ -8,6 +8,7 @@
  * Copyright (C) 2013 Pieter Voorthuijsen
  *
  * (c) 2019-2020 Andreas Böhler
+ * GPLv2
  */
 
 #include <stdio.h>
